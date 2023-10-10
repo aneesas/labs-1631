@@ -10,6 +10,7 @@ if __name__ == "__main__":
     height_sonar = data["h"]  # 1x1, m
     height_baro = data["baro"]  # 1x1, m
 
+    # TODO might have to do accel/vel/attitude as 3 separate plot calls
     plt.plot(acceleration)
     plt.xlabel("Time (s)")  # TODO actually I think this will be sample #, not time
     plt.ylabel("Acceleration (m/s^2)")
