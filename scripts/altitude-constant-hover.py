@@ -26,7 +26,7 @@ for t in np.arange(0, flight_time, 1 / framerate):
     readings.append(pilot.get_sensor_readings())
 
     # Send a control command to the drone (save for later)
-    h = pilot.get_sensor_readings()["h"]
+    h = pilot.get_sensor_readings().height
     yaw_rate = 0.0  # rad/s
     if h < 0.9:
         vz = 0.1
