@@ -42,6 +42,6 @@ if __name__ == "__main__":
     plt.plot(time, height_baro)
     plt.xlabel("Time (s)")
     plt.ylabel("Height - Baro (m)")
-    plt.savefig("data-baro.png")
     plt.tight_layout()
+    plt.savefig("data-baro.png")
     plt.close()
