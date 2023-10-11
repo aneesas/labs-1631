@@ -21,4 +21,4 @@ if __name__ == "__main__":
     readings_dict = tx.aggregate_sensor_readings(readings)
 
     # Save to npy file
-    np.save(sensor_data, readings_dict)
+    np.save("sensor_data", readings_dict)
