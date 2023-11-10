@@ -26,6 +26,7 @@ if __name__ == "__main__":
     yaw_angles = []
     altitudes = []
     times = []
+    vz_control = []
 
     # Make a pilot object and take off
     print("Drone taking off")
@@ -61,6 +62,7 @@ if __name__ == "__main__":
             cv2.putText(img, "detected",
                 (int(tags[0].center[0]), int(tags[0].center[1])),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            cv2.imwrite("AprilTagVisible.png", img)
         else:
             # Rotate a little
             print("Sending yaw command...")
@@ -85,6 +87,7 @@ if __name__ == "__main__":
             # If AprilTag not found at current altitude, stop rotating
             # Change height and repeat search
             vz = K1*(z - Z_REF)
+            vz_control.append(vz)
             vz = np.clip(vz, -1 * MAX_VZ_MAG, MAX_VZ_MAG)
             xyz_velocity = np.array([0.0, 0.0, vz])
             pilot.send_control(xyz_velocity, 0.0)
@@ -107,3 +110,7 @@ if __name__ == "__main__":
     ax.set_xlabel("Time since takeoff (s)")
     plt.savefig("yaw_and_altitude.png")
 
+    fig = plt.figure()
+    plt.plot(vz_control)
+    plt.ylabel("m/s")
+    plt.savefig("vz_control.png")
