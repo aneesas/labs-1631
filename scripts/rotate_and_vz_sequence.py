@@ -6,12 +6,12 @@ import cv2
 import tellox as tx
 
 # Constants
-YAW_RATE = 1.0  # deg/sec; keep this within []
+YAW_RATE = 50.0  # deg/sec; keep this within [-100, 100]
 MAX_HEIGHT = 2  # meters; depends on room
-MAX_VZ = 1.0
-MIN_VZ = -1.0
-CONTROL_RATE = 100.0  # Hz
-MAX_FLIGHT_TIME = 30  # seconds
+MAX_VZ_MAG = 1.0  # m/s
+YAW_CONTROL_RATE = 100.0  # Hz
+VEL_CONTROL_RATE = 5.0  # Hz
+MAX_FLIGHT_TIME = 60  # seconds
 
 # Control law values
 Z_REF = 2.5
@@ -54,22 +54,22 @@ if __name__ == "__main__":
         # Look for AprilTag
         img = pilot.get_camera_frame(visualize=False)
         tags = pilot.detect_tags(img, visualize=True)
-        # Save imagery
-        # TODO decrease save rate?
-        # cv2.putText(img, "detected",
-        #     (int(tags[0].center[0]), int(tags[0].center[1])),
-        #     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        # cv2.imwrite("./images/img" + str(img_num) + ".jpg", img)
-        img_num += 1
         if tags:
             print("Detected AprilTag! Landing...")
             apriltag_found = True
             pilot.land()
+            cv2.putText(img, "detected",
+                (int(tags[0].center[0]), int(tags[0].center[1])),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         else:
             # Rotate a little
+            print("Sending yaw command...")
             xyz_velocity = np.array([0.0, 0.0, 0.0])  # no lateral velocity
             pilot.send_control(xyz_velocity, YAW_RATE)
-            time.sleep(1 / CONTROL_RATE)
+            time.sleep(1 / YAW_CONTROL_RATE)
+        # Save imagery
+        cv2.imwrite("./images/img" + str(img_num) + ".jpg", img)
+        img_num += 1
 
         # Land if exceeded max flight time
         if (time.time() - start_time) > MAX_FLIGHT_TIME:
@@ -85,10 +85,10 @@ if __name__ == "__main__":
             # If AprilTag not found at current altitude, stop rotating
             # Change height and repeat search
             vz = K1*(z - Z_REF)
-            vz = np.clip(vz, MIN_VZ, MAX_VZ)
+            vz = np.clip(vz, -1 * MAX_VZ_MAG, MAX_VZ_MAG)
             xyz_velocity = np.array([0.0, 0.0, vz])
             pilot.send_control(xyz_velocity, 0.0)
-            time.sleep(1/CONTROL_RATE)
+            time.sleep(1 / VEL_CONTROL_RATE)
             print("Stopping altitude increase.")
             pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
             deg_turned = 0
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     # Plot logged data
     fig = plt.figure()
     ax = fig.add_subplot(2, 1, 1)
-    ax.plot(times, yaw_rate, "r-")
+    ax.plot(times, yaw_angles, "r-")
     ax.set_ylabel("Yaw (deg)")
 
     ax = fig.add_subplot(2, 1, 2)
