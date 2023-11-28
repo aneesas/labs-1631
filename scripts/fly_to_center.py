@@ -14,7 +14,10 @@ MAX_FLIGHT_TIME = 300  # seconds
 GATE_NUM_TAGS = 4  # defines how many AprilTags make up a full gate
 
 # Control law values
-X_REF = -3  # meters; for stabilizing drone relative to AprilTag gate
+X_REF = -1  # meters; for stabilizing drone relative to AprilTag gate
+K1 = 1
+K2 = 2
+KY = -0.5  # Simple feedback gain for vy commands
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
@@ -103,8 +106,10 @@ if __name__ == "__main__":
                 pilot.send_control(np.zeros(3), 0.0)
         else:
             # Increase altitude to keep searching
-            pilot.send_control(xyz_velocity, yaw_velocity)
+            pilot.send_control(xyz_velocity, 0.0)
             print("Increasing altitude...")
+            # az = k1*(z - z_ref) + k2*v_z_hat
+            # vz[t] = vz[t-1] + az[t]*dt
             # vz = K1 * (z - Z_REF) TODO
             vz = DELTA_POS
             vz = np.clip(vz, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
@@ -150,7 +155,7 @@ if __name__ == "__main__":
         positions.append(position)
 
         # Check stabilization thresholds, then land the drone if within bounds
-        x_diff = position[0] - X_REF  # want to be this far away from gate center
+        # x_diff = position[0] - X_REF  # want to be this far away from gate center
         y_diff = position[1] - gate_center_pos[1]
         z_diff = position[2] - gate_center_pos[2]
         if abs(x_diff) <= X_THRESH and abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
@@ -163,18 +168,15 @@ if __name__ == "__main__":
         else:
             # Stabilize at the desired point
             # TODO replace with actual controllers
-            # TODO I think we actually don't want x_vel commands? Assuming the drone can hold position okay
-            x_vel = KXYZ * x_diff
-            y_vel = KXYZ * y_diff
+            y_vel = KY * y_diff
             z_vel = KXYZ * z_diff
-            controls_gate.append((x_vel, y_vel, z_vel))
+            controls_gate.append((0.0, y_vel, z_vel))
 
             # Make sure to not go over control command bounds
-            x_vel = np.clip(x_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             y_vel = np.clip(y_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
 
-            xyz_velocity = np.array([x_vel, y_vel, z_vel])
+            xyz_velocity = np.array([0.0, y_vel, z_vel])
             # TODO eventually we want to plot what's actually sent, not computed
             # so should store these velocity commands instead
             print("Sending stabilization control:")
