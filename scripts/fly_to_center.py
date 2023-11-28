@@ -8,7 +8,7 @@ import tellox as tx
 # Constants/environment definition
 MAX_HEIGHT = 2  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.2  # m/s; for safety
-DELTA_POS = 0.1  # increments for sending velocity commands
+DELTA_POS = 0.5  # increments for sending velocity commands
 VEL_CONTROL_RATE = 10.0  # Hz
 MAX_FLIGHT_TIME = 300  # seconds
 GATE_NUM_TAGS = 4  # defines how many AprilTags make up a full gate
@@ -35,11 +35,14 @@ def get_gate_center(pilot: tx.Pilot, tags: list, top_left_idx: int):
     gate_center_camera_frame = np.mean(poses_camera_frame, axis=0)
     # Camera frame is +x right, +y down, +z forward, so the center will be positive distance from
     # the top-left tag of the gate
-    distance_camera_frame = gate_center_camera_frame - poses_camera_frame[idx, :]
+    distance_camera_frame = gate_center_camera_frame - poses_camera_frame[top_left_idx, :]
+    print("Computed distance in camera frame = gate_center - top_left_pose_camera_frame:")
+    print("\t", distance_camera_frame)
     gate_center_y_dist = distance_camera_frame[0]
     gate_center_z_dist = distance_camera_frame[1]
-    drone_pose_global, _, _ = pilot.get_drone_pose(tags[top_left_idx])
-    return np.array([drone_pose_global[0], drone_pose_global[1] + gate_center_y_dist, drone_pose_global[2] + gate_center_z_dist])
+    # drone_pose_global, _, _ = pilot.get_drone_pose(tags[top_left_idx])
+    # return np.array([drone_pose_global[0], drone_pose_global[1] + gate_center_y_dist, drone_pose_global[2] + gate_center_z_dist])
+    return (gate_center_y_dist, gate_center_z_dist)
 
 
 def get_top_left_idx(tags: list):
@@ -106,12 +109,11 @@ if __name__ == "__main__":
                 pilot.send_control(np.zeros(3), 0.0)
         else:
             # Increase altitude to keep searching
-            pilot.send_control(xyz_velocity, 0.0)
             print("Increasing altitude...")
             # az = k1*(z - z_ref) + k2*v_z_hat
             # vz[t] = vz[t-1] + az[t]*dt
             # vz = K1 * (z - Z_REF) TODO
-            vz = KY * DELTA_POS
+            vz = -1 * KY * DELTA_POS
             vz = np.clip(vz, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             xyz_velocity = np.array([0.0, 0.0, vz])
             pilot.send_control(xyz_velocity, 0.0)  # no yaw
@@ -130,7 +132,8 @@ if __name__ == "__main__":
     controls_gate = []  # to store velocity control commands
     positions = []
     stabilized = False
-    while not stabilized:
+    aprilTag_lost_cnt = 0
+    while not stabilized and gate_found:
         # Log sensor readings
         readings = pilot.get_sensor_readings()
         altitudes.append(readings.height)
@@ -143,12 +146,16 @@ if __name__ == "__main__":
         # TODO just keep looping if it doesn't work?
         if len(tags) < GATE_NUM_TAGS:
             print("Waiting to re-detect all tags...")
+            aprilTag_lost_cnt += 1
+            if aprilTag_lost_cnt > 10:
+                print("Lost gate, setting gate_found to False")
+                gate_found = False
             continue
 
         # Use the top-left gate tag as the reference point
         reference_tag_idx = get_top_left_idx(tags)
-        gate_center_pos = get_gate_center(pilot, tags, reference_tag_idx)
-        print("Gate center wrt tag ID {} = {}".format(reference_tag_idx, gate_center_pos))
+        gate_center_dist_yz = get_gate_center(pilot, tags, reference_tag_idx)
+        print("Gate center wrt tag ID {} = {}".format(reference_tag_idx, gate_center_dist_yz))
 
         position , _, _ = pilot.get_drone_pose(tags[reference_tag_idx])
         print("Current position wrt reference tag:", position)
@@ -156,9 +163,9 @@ if __name__ == "__main__":
 
         # Check stabilization thresholds, then land the drone if within bounds
         # x_diff = position[0] - X_REF  # want to be this far away from gate center
-        y_diff = position[1] - gate_center_pos[1]
-        z_diff = position[2] - gate_center_pos[2]
-        if abs(x_diff) <= X_THRESH and abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
+        y_diff = position[1] - (position[1] + gate_center_dist_yz[0])
+        z_diff = position[2] - (position[2] + gate_center_dist_yz[1])
+        if abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
             stabilized = True
             # TODO land just for now
             pilot.land()
