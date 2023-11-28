@@ -14,7 +14,7 @@ MAX_FLIGHT_TIME = 300  # seconds
 GATE_NUM_TAGS = 4  # defines how many AprilTags make up a full gate
 
 # Control law values
-X_REF = -1  # meters; for stabilizing drone relative to AprilTag gate
+X_REF = -3  # meters; for stabilizing drone relative to AprilTag gate
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
@@ -163,6 +163,7 @@ if __name__ == "__main__":
         else:
             # Stabilize at the desired point
             # TODO replace with actual controllers
+            # TODO I think we actually don't want x_vel commands? Assuming the drone can hold position okay
             x_vel = KXYZ * x_diff
             y_vel = KXYZ * y_diff
             z_vel = KXYZ * z_diff
