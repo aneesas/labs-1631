@@ -111,7 +111,7 @@ if __name__ == "__main__":
             # az = k1*(z - z_ref) + k2*v_z_hat
             # vz[t] = vz[t-1] + az[t]*dt
             # vz = K1 * (z - Z_REF) TODO
-            vz = DELTA_POS
+            vz = KY * DELTA_POS
             vz = np.clip(vz, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             xyz_velocity = np.array([0.0, 0.0, vz])
             pilot.send_control(xyz_velocity, 0.0)  # no yaw
@@ -169,7 +169,7 @@ if __name__ == "__main__":
             # Stabilize at the desired point
             # TODO replace with actual controllers
             y_vel = KY * y_diff
-            z_vel = KXYZ * z_diff
+            z_vel = KY * z_diff
             controls_gate.append((0.0, y_vel, z_vel))
 
             # Make sure to not go over control command bounds
