@@ -1,6 +1,38 @@
 import numpy as np
+import time
 
 import tellox as tx
+
+
+def fly_open_loop(pilot, xyz_velocity, total_time, command_rate):
+    time_elapsed = 0.0
+    dt = 1.0/command_rate
+    while time_elapsed < total_time:
+        pilot.send_control(xyz_velocity, 0.0)
+        time.sleep(dt)
+        time_elapsed += dt
+    pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+    print("Completed flight for {} seconds at {} m/s.".format(time_elapsed, xyz_velocity))
+    return
+
+
+def turn_180(pilot, yaw_rate, command_rate):
+    deg_turned = 0.0
+    readings = pilot.get_sensor_readings()
+    yaw_prev = readings.attitude[2]
+    print("Initial yaw angle = ", yaw_prev)
+    while (deg_turned < 180):
+        readings = pilot.get_sensor_readings()
+        yaw_angle = readings.attitude[2]
+        deg_turned += (yaw_angle - yaw_prev)
+        print("Current angle = {} deg; total deg turned = {}".format(yaw_angle, deg_turned))
+        yaw_prev = yaw_angle
+        pilot.send_control(np.array([0.0, 0.0, 0.0]), yaw_rate)
+        time.sleep(1.0/command_rate)
+    pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+    print("Completed 180-degree turn.")
+    return
+
 
 def get_gate_center(pilot: tx.Pilot, tags: list, top_left_idx: int):
     """
