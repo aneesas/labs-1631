@@ -25,8 +25,8 @@ KY = -0.5  # Simple feedback gain for vy commands
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
-Y_THRESH = 0.1
-Z_THRESH = 0.1
+Y_THRESH = 0.15
+Z_THRESH = 0.5
 
 
 if __name__ == "__main__":
@@ -158,6 +158,9 @@ if __name__ == "__main__":
     x_vel = 0.3  # m/s
     fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.5, VEL_CONTROL_RATE)
 
+    # Wait for the drone to completely stop flying forward, because it takes a second
+    time.sleep(1.0)
+
     # Turn around after passing through gate
     deg_turned = 0.0
     readings = pilot.get_sensor_readings()
@@ -169,7 +172,7 @@ if __name__ == "__main__":
         deg_turned += abs(yaw_angle - yaw_prev)
         print("Current angle = {} deg; total deg turned = {}".format(yaw_angle, deg_turned))
         yaw_prev = yaw_angle
-        pilot.send_control(np.array([0.0, 0.0, 0.0]), YAW_RATE)
+        pilot.send_control(np.array([0.0, 0.0, 0.0]), -YAW_RATE)
         time.sleep(1.0/YAW_CONTROL_RATE)
         img = pilot.get_camera_frame(visualize=False)
         tags = pilot.detect_tags(img, visualize=True)
@@ -186,16 +189,14 @@ if __name__ == "__main__":
         img = pilot.get_camera_frame(visualize=False)
         tags = pilot.detect_tags(img, visualize=True)
 
-        if tags:
-            if len(tags) == GATE_NUM_TAGS:
-                print("Gate found in field of view! Detected {} AprilTags".format(len(tags)))
-                pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
-                gate_found = True
-                cv2.imwrite("GateVisibleAgain.png", img)
-                pilot.land()
-            else:
-                print("Only detected {} AprilTags; expected {}".format(len(tags), GATE_NUM_TAGS))
+        if tags and len(tags) == GATE_NUM_TAGS:
+            print("Gate found in field of view! Detected {} AprilTags".format(len(tags)))
+            pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+            gate_found = True
+            cv2.imwrite("GateVisibleAgain.png", img)
+            pilot.land()
         else:
+            print("Only detected {} AprilTags; expected {}".format(len(tags), GATE_NUM_TAGS))
             # Fly backwards SLOWLY
             print("Backing drone up...")
             pilot.send_control(np.array([-0.1, 0.0, 0.0]), 0.0)
