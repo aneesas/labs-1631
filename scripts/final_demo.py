@@ -156,12 +156,32 @@ if __name__ == "__main__":
     print("Flying through gate...")
     x_dist = 4.0  # m
     x_vel = 0.3  # m/s
-    fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.0, VEL_CONTROL_RATE)
+    fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.5, VEL_CONTROL_RATE)
 
-    turn_180(pilot, YAW_RATE, YAW_CONTROL_RATE)
+    # Turn around after passing through gate
+    deg_turned = 0.0
+    readings = pilot.get_sensor_readings()
+    yaw_prev = readings.attitude[2]
+    print("Initial yaw angle = ", yaw_prev)
+    while (deg_turned < 180):
+        readings = pilot.get_sensor_readings()
+        yaw_angle = readings.attitude[2]
+        deg_turned += abs(yaw_angle - yaw_prev)
+        print("Current angle = {} deg; total deg turned = {}".format(yaw_angle, deg_turned))
+        yaw_prev = yaw_angle
+        pilot.send_control(np.array([0.0, 0.0, 0.0]), YAW_RATE)
+        time.sleep(1.0/YAW_CONTROL_RATE)
+        img = pilot.get_camera_frame(visualize=False)
+        tags = pilot.detect_tags(img, visualize=True)
+        if tags and len(tags) == (GATE_NUM_TAGS - 2):
+            print("Found gate while turning! Stopping turn...")
+            pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+    pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+    print("Completed turn.")
 
     gate_found = False
-    while not gate_found:
+    search_time = 0.0
+    while not gate_found and search_time < 1.5:
         # Search for tags
         img = pilot.get_camera_frame(visualize=False)
         tags = pilot.detect_tags(img, visualize=True)
@@ -178,8 +198,11 @@ if __name__ == "__main__":
         else:
             # Fly backwards SLOWLY
             print("Backing drone up...")
-            pilot.send_control(np.array([-0.2, 0.0, 0.0]), 0.0)
+            pilot.send_control(np.array([-0.1, 0.0, 0.0]), 0.0)
             time.sleep(1.0 / VEL_CONTROL_RATE)
+            search_time += 1.0/VEL_CONTROL_RATE
+    print("Landing...")
+    pilot.land()
 
     # For debugging/analysis:
     # Plot logged data
