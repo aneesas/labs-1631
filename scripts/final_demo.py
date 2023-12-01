@@ -8,11 +8,11 @@ import tellox as tx
 from utils import *
 
 # Constants/environment definition
-MAX_HEIGHT = 5  # meters; depends on room, used for safety checks
+MAX_HEIGHT = 8  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.75  # m/s; for safety
-DELTA_POS = 0.5  # increments for sending velocity commands
+DELTA_POS = 1.0  # increments for sending velocity commands
 VEL_CONTROL_RATE = 5.0  # Hz
-MAX_FLIGHT_TIME = 100  # seconds
+MAX_FLIGHT_TIME = 200  # seconds
 GATE_NUM_TAGS = 8  # defines how many AprilTags make up a full gate
 YAW_RATE = 25.0  # deg/sec; keep this within [-100, 100]
 YAW_CONTROL_RATE = 100.0  # Hz
@@ -31,8 +31,6 @@ Z_THRESH = 0.5
 
 if __name__ == "__main__":
     print("Starting script...")
-    # For tracking flight time
-    start_time = time.time()
 
     # Collection containers for sensor readings
     altitudes = []
@@ -43,6 +41,10 @@ if __name__ == "__main__":
     print("Drone taking off")
     pilot = tx.Pilot()
     pilot.takeoff()
+
+    # For tracking flight time
+    start_time = time.time()
+    print("Start time = ", start_time)
 
     # We're assuming that the drone starts facing the gate, so we don't need to rotate to search
     gate_found = False
@@ -104,7 +106,7 @@ if __name__ == "__main__":
             # Detect new tag positions
             img = pilot.get_camera_frame(visualize=False)
             tags = pilot.detect_tags(img, visualize=True)
-            print("Detected {} AprilTags in FOV; expected {}".format(len(tags), GATE_NUM_TAGS))
+            print("Detected {} AprilTags in FOV; expected {} for gate".format(len(tags), GATE_NUM_TAGS))
             # TODO just keep looping if it doesn't work?
             if len(tags) < (GATE_NUM_TAGS - 2):
                 print("Waiting to re-detect all tags...")
@@ -155,8 +157,8 @@ if __name__ == "__main__":
 
     print("Flying through gate...")
     x_dist = 4.0  # m
-    x_vel = 0.3  # m/s
-    fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.5, VEL_CONTROL_RATE)
+    x_vel = 0.35  # m/s
+    fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.0, VEL_CONTROL_RATE)
 
     # Wait for the drone to completely stop flying forward, because it takes a second
     time.sleep(1.0)
@@ -196,14 +198,19 @@ if __name__ == "__main__":
             cv2.imwrite("GateVisibleAgain.png", img)
             pilot.land()
         else:
-            print("Only detected {} AprilTags; expected {}".format(len(tags), GATE_NUM_TAGS))
+            print("Detected {} AprilTags; expected {} for gate".format(len(tags), GATE_NUM_TAGS))
             # Fly backwards SLOWLY
             print("Backing drone up...")
             pilot.send_control(np.array([-0.1, 0.0, 0.0]), 0.0)
             time.sleep(1.0 / VEL_CONTROL_RATE)
             search_time += 1.0/VEL_CONTROL_RATE
     print("Landing...")
+    time_before_land = time.time()
+    print("Elapsed time before land = ", time_before_land - start_time)
     pilot.land()
+    end_time = time.time()
+    print("End time = ", end_time)
+    print("Elapsed time after land = ", end_time - start_time)
 
     # For debugging/analysis:
     # Plot logged data
@@ -211,14 +218,12 @@ if __name__ == "__main__":
     controls_altitude = np.array(controls_altitude)
     controls_gate = np.array(controls_gate)
 
-    # plt.figure()
-    # plt.plot(controls_altitude[:, 0], label="x_vel")
-    # plt.plot(controls_altitude[:, 1], label="y_vel")
-    # plt.plot(controls_altitude[:, 2], label="z_vel")
-    # plt.ylabel("Velocity control (m/s)")
-    # plt.title("Velocity control to detect gate")
-    # plt.legend()
-    # plt.savefig("controls_altitude.png")
+    plt.figure()
+    plt.plot(controls_altitude[:, 2], label="z_vel")
+    plt.ylabel("Velocity control (m/s)")
+    plt.title("Velocity control to detect gate")
+    plt.legend()
+    plt.savefig("controls_altitude.png")
 
     # plt.figure()
     # plt.plot(controls_gate[:, 0], label="x_vel")
