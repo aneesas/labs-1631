@@ -9,51 +9,28 @@ from utils import *
 
 # Constants/environment definition
 MAX_HEIGHT = 5  # meters; depends on room, used for safety checks
-MAX_VEL_MAG = 0.75  # m/s; for safety
+MAX_VEL_MAG = 0.3  # m/s; for safety
 DELTA_POS = 0.5  # increments for sending velocity commands
 Z_REF = 2.0  # target height for finding the AprilTags
-VEL_CONTROL_RATE = 5.0  # Hz
+VEL_CONTROL_RATE = 50.0  # Hz
 MAX_FLIGHT_TIME = 100  # seconds
-GATE_NUM_TAGS = 8  # defines how many AprilTags make up a full gate
+GATE_NUM_TAGS = 6  # defines how many AprilTags make up a full gate
 
 # Control law values
-X_REF = -2.0  # meters; for stabilizing drone relative to AprilTag gate
+X_REF = -1.5  # meters; for stabilizing drone relative to AprilTag gate
 K1 = 1
 K2 = 2
 KY = -0.5  # Simple feedback gain for vy commands
-# A-LC = [-4 1]
-#        [-4 0]
-A_OBSERVER = np.array([[-4, 1], [-4, 0]])
+# A - BK - LC = [-4  1]
+#               [-5 -2]
+L1 = 4
+L2 = 4
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
-Y_THRESH = 0.1
-Z_THRESH = 0.1
+Y_THRESH = 0.05
+Z_THRESH = 0.05
 
-
-def compute_vz(x_prev, vz_prev, dt, dz):
-    # x = [z_hat, vz_hat]
-    # az = k1*(z - z_ref) + k2*v_z_hat
-    # vz[t] = vz[t-1] + az[t]*dt
-    x = x_prev + dt * np.matmul(A_OBSERVER, x_prev)
-    vz_hat = x[-1]  # from state definition
-    print("\tvz_hat = ", vz_hat)
-    az = K1 * dz + K2 * vz_hat
-    print("\taz = ", az)
-    vz = vz_prev + az * dt
-    return(x, vz)
-
-def fly_open_loop(pilot, xyz_velocity, total_time, command_rate):
-    time_elapsed = 0.0
-    dt = 1.0/command_rate
-    while time_elapsed < total_time:
-        pilot.send_control(xyz_velocity, 0.0)
-        v_xyz.append(xyz_velocity)
-        time.sleep(dt)
-        time_elapsed += dt
-    pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
-    print("Completed open-loop flight for {} seconds at {} m/s.".format(time_elapsed, xyz_velocity))
-    return
 
 if __name__ == "__main__":
     print("Starting script...")
@@ -63,36 +40,17 @@ if __name__ == "__main__":
     # Make a pilot object and take off
     print("Drone taking off")
     pilot = tx.Pilot()
-    # pilot.takeoff()
-
-    # Collection containers for sensor readings
-    altitudes = []
-    times = []
-    controls_altitude = []
-    v_xyz = []
-    positions = []
-
-    # Get initial sensor readings
-    readings = pilot.get_sensor_readings()
-    altitudes.append(readings.height)
-    times.append(readings.flight_time)
+    pilot.takeoff()
 
     # We're assuming that the drone starts facing the gate, so we don't need to rotate to search
     gate_found = False
     stabilized = False
-    # Initialize observer state to [z_hat = altitude measurement, vz_hat = 0]
-    state_prev = np.array([-DELTA_POS, 0.0])
-    print("Initial state = {} (m, m/s)".format(state_prev))
-    vz_prev = 0.0
     while not gate_found and not stabilized:
         # Log sensor readings
         readings = pilot.get_sensor_readings()
-        altitudes.append(readings.height)
-        times.append(readings.flight_time)
 
         # Current height
-        z = altitudes[-1]
-        if z > MAX_HEIGHT:
+        if readings.height > MAX_HEIGHT:
             print("WARNING: Flew too high! Landing for safety...")
             pilot.land()
             break
@@ -110,20 +68,12 @@ if __name__ == "__main__":
         else:
             # Increase altitude to keep searching
             print("Increasing altitude...")
-            state, vz = compute_vz(state_prev, vz_prev, 1/VEL_CONTROL_RATE, altitudes[-1] - Z_REF)
-            print("Computed state = {} (m, m/s)".format(state))
-            # Save actual computed values
-            controls_altitude.append(vz)
-            # vz = np.clip(vz, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
-            xyz_velocity = np.array([0.0, 0.0, vz])  # TODO -vz? or vz?
-            v_xyz.append(xyz_velocity)
-            print("Sending velocity command: ", xyz_velocity)
-            # pilot.send_control(xyz_velocity, 0.0)  # no yaw
+            z_vel = -1 * KY * DELTA_POS
+            z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
+            xyz_velocity = np.array([0.0, 0.0, z_vel])
+            pilot.send_control(xyz_velocity, 0.0)  # no yaw
             time.sleep(1 / VEL_CONTROL_RATE)
-            state_prev = state
-            vz_prev = vz
-            print("state_prev = ", state_prev)
-            print("vz_prev = ", vz_prev)
+            print("Sending velocity command: ", xyz_velocity)
 
         # Land if exceeded max flight time
         if (time.time() - start_time) > MAX_FLIGHT_TIME:
@@ -132,15 +82,18 @@ if __name__ == "__main__":
             pilot.land()
             break
 
-        controls_gate = []  # to store velocity control commands
+        # Collection containers for sensor readings
         positions = []
+        controls_altitude = []
         aprilTag_lost_cnt = 0
+        # Initialize observer state
+        vz_hat = 0.0
+        z_hat = 0.0
+        vz = 0.0
         while not stabilized and gate_found:
             print("Stabilizing at gate center...")
             # Log sensor readings
             readings = pilot.get_sensor_readings()
-            altitudes.append(readings.height)
-            times.append(readings.flight_time)
 
             # Detect new tag positions
             img = pilot.get_camera_frame(visualize=False)
@@ -155,26 +108,17 @@ if __name__ == "__main__":
                     gate_found = False
                 continue
 
-            # Use the top-left gate tag as the reference point
-            # reference_tag_idx = get_top_left_idx(tags)
-            # gate_center_dist_yz = get_gate_center(pilot, tags, reference_tag_idx)
-            # print("Gate center wrt tag ID {} = {}".format(reference_tag_idx, gate_center_dist_yz))
-
-            # position , _, _ = pilot.get_drone_pose(tags[reference_tag_idx])
-            # print("Current position wrt reference tag:", position)
-            # positions.append(position)
             position = get_pose_gate_center(pilot, tags)
             print("Pose w.r.t. gate center = ", position)
             positions.append(position)
 
             # Check stabilization thresholds, then land the drone if within bounds
             x_diff = position[0] - X_REF
-            y_diff = -position[1]
+            y_diff = position[1]
             z_diff = position[2]
 
             if abs(x_diff) <= X_THRESH and abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
                 stabilized = True
-                # TODO land just for now
                 print("Stabilized at gate center!")
                 pilot.land()
                 cv2.imwrite("GateVisible.png", img)
@@ -188,32 +132,38 @@ if __name__ == "__main__":
                 y_vel = KY * y_diff
 
                 # Full-state feedback
-                state, z_vel = compute_vz(state_prev, vz_prev, 1/VEL_CONTROL_RATE, z_diff)
-                print("Computed state = {} (m, m/s)".format(state))
-                controls_gate.append((x_vel, y_vel, z_vel))
-                state_prev = state
-                vz_prev = z_vel
+                # az = -k1*(z_hat - z_ref) - k2*v_z_hat
+                # vz[t] = vz[t-1] + az[t]*dt
+                z = position[2]
+                dt = 1.0 / VEL_CONTROL_RATE
+                print("\tvz_hat = ", vz_hat)
+                az = -K1 * z_hat - (K2 * vz_hat)
+                print("\taz = ", az)
+                z_hat_dot = L1*z - L1*z_hat + vz_hat
+                vz_hat_dot = L2*z - (K1 + L2)*z_hat - (K2 * vz_hat)
+                vz = vz + az * dt
 
+                # Propagate states forward
+                z_hat += dt * z_hat_dot
+                vz_hat += dt * vz_hat_dot
+                print("Computed state = ({}, {}) (m, m/s)".format(z_hat, vz_hat))
+
+                # Control values
+                z_vel = vz
                 # Make sure to not go over control command bounds
                 x_vel = np.clip(x_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 y_vel = np.clip(y_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
 
-                xyz_velocity = np.array([x_vel, y_vel, -z_vel])
-                # TODO eventually we want to plot what's actually sent, not computed
-                # so should store these velocity commands instead
+                xyz_velocity = np.array([x_vel, y_vel, z_vel])
                 print("Sending stabilization control:")
                 print("Velocity: ", xyz_velocity)
                 pilot.send_control(xyz_velocity, 0.0)  # no yaw
-                v_xyz.append((xyz_velocity[1], xyz_velocity[2]))
+                controls_altitude.append(xyz_velocity)
                 # Let it run for a short amount of time before stopping?
                 time.sleep(1 / VEL_CONTROL_RATE)
-                pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
-
-    print("Flying through gate...")
-    x_dist = 2  # m
-    x_vel = 0.30  # m/s
-    fly_open_loop(pilot, np.array([x_vel, 0.0, 0.0]), 6.0, VEL_CONTROL_RATE)
+                # pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
+    
 
     # Wait for the drone to completely stop flying forward, because it takes a second
     time.sleep(1.0)
@@ -221,12 +171,14 @@ if __name__ == "__main__":
     # Plot logged data
     positions = np.array(positions)
     controls_altitude = np.array(controls_altitude)
-    controls_gate = np.array(controls_gate)
-    v_xyz = np.array(v_xyz)
 
     # Store data 
-    data = np.array((positions, v_xyz), dtype=float)
-    np.save("gate_pass_data.npy", data)
+    positions = np.array(positions)
+    controls_altitude = np.array(controls_altitude)
+
+    
+    np.save("position.npy", positions)
+    np.save("controls_altitude.npy", controls_altitude)
 
     # Plot data
     plt.figure()
