@@ -10,19 +10,20 @@ from utils import *
 # Constants
 MAX_HEIGHT = 2.5  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.5  # m/s; for safety
-VEL_CONTROL_RATE = 5.0  # Hz
+VEL_CONTROL_RATE = 50.0  # Hz
 OPEN_LOOP_VEL = 0.25  # m/s
 MAX_FLIGHT_TIME = 60  # seconds
-GATE_NUM_TAGS = 4  # defines how many AprilTags make up a full gate
+GATE_NUM_TAGS = 6  # defines how many AprilTags make up a full gate
 
 # Control law values
 X_OPEN_LOOP = 1.5  # 5 ft to meters
 X_REF_FINAL = -3.0  # 10 ft to meters
-Z_REF = 1.5  # meters; TODO (pick roughly the center of the gate)
+Z_REF = 2.0  # meters; TODO (pick roughly the center of the gate)
 K = -0.5  # Simple feedback gain
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
+Y_THRESH = 0.15
 Z_THRESH = 0.4  # noisier?
 
 if __name__ == "__main__":
@@ -77,8 +78,6 @@ if __name__ == "__main__":
             controls.append(xyz_velocity)
             pilot.send_control(xyz_velocity, 0.0)
             time.sleep(1.0 / VEL_CONTROL_RATE)
-            pilot.send_control(np.array[0.0, 0.0, 0.0], 0.0)
-
 
     # Open-loop flight to X_REF distance
     # We're assuming the drone started at a known distance away from the wall/gate
@@ -106,7 +105,7 @@ if __name__ == "__main__":
                 gate_found = True
                 cv2.imwrite("Apriltags_again_visible.png", img)
                 # Just in case
-                pilot.send_control([0.0, 0.0, 0.0], 0.0)
+                pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
 
         # Keep z stable
         z_diff = z - z0
@@ -119,7 +118,7 @@ if __name__ == "__main__":
         # Fly for estimated amount of time needed to traverse desired distance
         if not gate_found:
             if time_elapsed < total_time:
-                xyz_velocity = np.array([OPEN_LOOP_VEL, 0.0, vz])
+                xyz_velocity = np.array([-OPEN_LOOP_VEL, 0.0, vz])
                 pilot.send_control(xyz_velocity, 0.0)
                 controls.append(xyz_velocity)
                 time.sleep(dt)
@@ -161,6 +160,9 @@ if __name__ == "__main__":
     # Plot logged data
     positions = np.array(positions)
     controls = np.array(controls)
+
+    np.save("positions_cl.npy", positions)
+    np.save("controls_cl.npy", controls)
 
     plt.figure()
     plt.plot(controls[:, 0], label="vx")
