@@ -28,8 +28,8 @@ L2 = 4
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
-Y_THRESH = 0.1
-Z_THRESH = 0.1
+Y_THRESH = 0.05
+Z_THRESH = 0.05
 
 
 if __name__ == "__main__":
@@ -42,28 +42,15 @@ if __name__ == "__main__":
     pilot = tx.Pilot()
     pilot.takeoff()
 
-    # Collection containers for sensor readings
-    altitudes = []
-    times = []
-    controls_altitude = []
-    vy_vz = []
-
-    # Get initial sensor readings
-    readings = pilot.get_sensor_readings()
-    altitudes.append(readings.height)
-    times.append(readings.flight_time)
-
     # We're assuming that the drone starts facing the gate, so we don't need to rotate to search
     gate_found = False
     stabilized = False
     while not gate_found and not stabilized:
         # Log sensor readings
         readings = pilot.get_sensor_readings()
-        altitudes.append(readings.height)
-        times.append(readings.flight_time)
 
         # Current height
-        if altitudes[-1] > MAX_HEIGHT:
+        if readings.height > MAX_HEIGHT:
             print("WARNING: Flew too high! Landing for safety...")
             pilot.land()
             break
@@ -85,7 +72,6 @@ if __name__ == "__main__":
             z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             xyz_velocity = np.array([0.0, 0.0, z_vel])
             pilot.send_control(xyz_velocity, 0.0)  # no yaw
-            controls_altitude.append(xyz_velocity)
             time.sleep(1 / VEL_CONTROL_RATE)
             print("Sending velocity command: ", xyz_velocity)
 
@@ -96,7 +82,10 @@ if __name__ == "__main__":
             pilot.land()
             break
 
-        controls_gate = []  # to store velocity control commands
+        # Collection containers for sensor readings
+        altitudes = []
+        vy_commands = []
+        vz_commands = []
         positions = []
         aprilTag_lost_cnt = 0
         # Initialize observer state
@@ -108,7 +97,6 @@ if __name__ == "__main__":
             # Log sensor readings
             readings = pilot.get_sensor_readings()
             altitudes.append(readings.height)
-            times.append(readings.flight_time)
 
             # Detect new tag positions
             img = pilot.get_camera_frame(visualize=False)
@@ -150,6 +138,7 @@ if __name__ == "__main__":
                 # az = -k1*(z_hat - z_ref) - k2*v_z_hat
                 # vz[t] = vz[t-1] + az[t]*dt
                 z = position[2]
+                altitudes.append(z)
                 dt = 1.0 / VEL_CONTROL_RATE
                 print("\tvz_hat = ", vz_hat)
                 az = -K1 * z_hat - (K2 * vz_hat)
@@ -165,20 +154,17 @@ if __name__ == "__main__":
 
                 # Control values
                 z_vel = vz
-                controls_gate.append((x_vel, y_vel, z_vel))
-
                 # Make sure to not go over control command bounds
                 x_vel = np.clip(x_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 y_vel = np.clip(y_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
 
                 xyz_velocity = np.array([x_vel, y_vel, z_vel])
-                # TODO eventually we want to plot what's actually sent, not computed
-                # so should store these velocity commands instead
                 print("Sending stabilization control:")
                 print("Velocity: ", xyz_velocity)
                 pilot.send_control(xyz_velocity, 0.0)  # no yaw
-                vy_vz.append((xyz_velocity[1], xyz_velocity[2]))
+                vy_commands.append(xyz_velocity[1])
+                vz_commands.append(xyz_velocity[2])
                 # Let it run for a short amount of time before stopping?
                 time.sleep(1 / VEL_CONTROL_RATE)
                 # pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
@@ -186,15 +172,16 @@ if __name__ == "__main__":
 
     # For debugging/analysis:
     # Plot logged data
+    altitudes = np.array(altitudes)
     positions = np.array(positions)
     y_rel = np.array(positions[:,1])
-    controls_altitude = np.array(controls_altitude)
-    controls_gate = np.array(controls_gate)
-    vy_vz = np.array(vy_vz)
+    vy_commands = np.array(vy_commands)
+    vz_commands = np.array(vz_commands)
 
-    # Store data 
-    data = np.array((altitudes, y_rel, vy_vz), dtype=float)
-    np.save("height_command_data.npy", data)
+    np.save("y_rel.npy", y_rel)
+    np.save("altitudes.npy", altitudes)
+    np.save("vy.npy", vy_commands)
+    np.save("vz.npy", vz_commands)
 
     # Plot data
     plt.figure()
@@ -212,14 +199,14 @@ if __name__ == "__main__":
     plt.savefig("y_rel.png")
 
     plt.figure()
-    plt.plot(vy_vz[:, 0], label="v_y")
+    plt.plot(vy_commands, label="v_y")
     plt.title("Stabilizing Velocity Commands in the y-direction")
     plt.ylabel("v_y (m/s)")
     plt.legend()
     plt.savefig("v_y.png")
 
     plt.figure()
-    plt.plot(vy_vz[:, 1], label="v_z")
+    plt.plot(vz_commands, label="v_z")
     plt.title("Stabilizing Velocity Commands in the z-direction")
     plt.ylabel("v_z (m/s)")
     plt.legend()
