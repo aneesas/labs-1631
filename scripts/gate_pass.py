@@ -5,8 +5,6 @@ import cv2
 
 import tellox as tx
 
-from utils import *
-
 # Constants/environment definition
 MAX_HEIGHT = 5  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.3  # m/s; for safety
