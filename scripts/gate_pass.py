@@ -118,6 +118,7 @@ if __name__ == "__main__":
                 if aprilTag_lost_cnt > 10:
                     print("Lost gate, setting gate_found to False")
                     gate_found = False
+                    aprilTag_lost_cnt = 0
                 continue
 
             position = get_pose_gate_center(pilot, tags)

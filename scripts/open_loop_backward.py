@@ -11,7 +11,6 @@ from utils import *
 MAX_HEIGHT = 5  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.3  # m/s; for safety
 DELTA_POS = 0.5  # increments for sending velocity commands
-Z_REF = 2.0  # target height for finding the AprilTags
 VEL_CONTROL_RATE = 50.0  # Hz
 MAX_FLIGHT_TIME = 100  # seconds
 GATE_NUM_TAGS = 6  # defines how many AprilTags make up a full gate
@@ -32,6 +31,18 @@ L2 = 4
 X_THRESH = 0.1  # meters
 Y_THRESH = 0.05
 Z_THRESH = 0.05
+
+
+def get_pose_gate_center(pilot: tx.Pilot, tags: list):
+    """
+    Takes list of Detection objects defining a gate and returns a numpy array denoting the
+    center of the gate
+    """
+    drone_poses = np.zeros((len(tags), 3))
+    for idx, t in enumerate(tags):
+        drone_poses[idx, :], _, _ = pilot.get_drone_pose(t)
+    pose_gate_center = np.mean(drone_poses, axis=0)
+    return pose_gate_center
 
 
 if __name__ == "__main__":
@@ -93,7 +104,6 @@ if __name__ == "__main__":
             pilot.land()
             break
 
-        # Collection containers for sensor readings
         aprilTag_lost_cnt = 0
         # Initialize observer state
         vz_hat = 0.0
@@ -108,13 +118,15 @@ if __name__ == "__main__":
             img = pilot.get_camera_frame(visualize=False)
             tags = pilot.detect_tags(img, visualize=True)
             print("Detected {} AprilTags in FOV; expected {}".format(len(tags), GATE_NUM_TAGS))
-            # TODO just keep looping if it doesn't work?
+
+            # Tends to lose altitude just from drifting so it might lose tags
             if len(tags) < (GATE_NUM_TAGS - 2):
                 print("Waiting to re-detect all tags...")
                 aprilTag_lost_cnt += 1
                 if aprilTag_lost_cnt > 10:
                     print("Lost gate, setting gate_found to False")
                     gate_found = False
+                    aprilTag_lost_cnt = 0
                 continue
 
             position = get_pose_gate_center(pilot, tags)
@@ -128,7 +140,6 @@ if __name__ == "__main__":
             if abs(x_diff) <= X_THRESH and abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
                 stabilized = True
                 print("Stabilized at gate center!")
-                #pilot.land()
                 cv2.imwrite("GateVisible.png", img)
                 break
 
@@ -171,18 +182,18 @@ if __name__ == "__main__":
                 vy_commands.append(xyz_velocity[1])
                 vz_commands.append(xyz_velocity[2])
                 yaw_commands.append(0.0)
-                # Let it run for a short amount of time before stopping?
                 time.sleep(1 / VEL_CONTROL_RATE)
-                # pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
     
     # Turn around after passing through gate
     deg_turned = 0.0
     readings = pilot.get_sensor_readings()
     yaw_prev = readings.attitude[2]
+    yaw_angles = [yaw_prev]
     print("Initial yaw angle = ", yaw_prev)
     while (deg_turned < 180):
         readings = pilot.get_sensor_readings()
         yaw_angle = readings.attitude[2]
+        yaw_angles.append(yaw_angle)
         deg_turned += abs(yaw_angle - yaw_prev)
         print("Current angle = {} deg; total deg turned = {}".format(yaw_angle, deg_turned))
         yaw_prev = yaw_angle
@@ -195,7 +206,7 @@ if __name__ == "__main__":
     pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
     print("Completed turn.")
 
-    #fly_open_loop(pilot, np.array([0.2, 0.0, 0.0]), 2.0, VEL_CONTROL_RATE)
+    # Open-loop flight 
     time_elapsed = 0.0
     dt = 1.0/VEL_CONTROL_RATE
     total_time = 2.0
@@ -209,38 +220,22 @@ if __name__ == "__main__":
         time.sleep(dt)
         time_elapsed += dt
     pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
-
-    # Wait for the drone to completely stop flying forward, because it takes a second
-    time.sleep(1.0)
-    # For debugging/analysis:
     
     # Plot logged data
     vx_commands = np.array(vx_commands)
     vy_commands = np.array(vy_commands)
     vz_commands = np.array(vz_commands)
     yaw_commands = np.array(yaw_commands)
+    yaw_angles = np.array(yaw_angles)
 
-    
     np.save("vx_commands.npy", vx_commands)
     np.save("vy_commands.npy", vy_commands)
     np.save("vz_commands.npy", vz_commands)
     np.save("yaw_commands.npy", yaw_commands)
 
-    # # Plot data
-    # plt.figure()
-    # plt.plot(positions[:, 0], label="x")
-    # plt.plot(positions[:, 1], label="y")
-    # plt.plot(positions[:, 2], label="z")
-    # plt.title("Relative position of drone w.r.t. the Center of the April Tags")
-    # plt.ylabel("Rel. position (m)")
-    # plt.legend()
-    # plt.savefig("gate_pass_states.png")
-
-    # plt.figure()
-    # plt.plot(v_xyz[:, 0], label="vx")
-    # plt.plot(v_xyz[:, 1], label="vy")
-    # plt.plot(v_xyz[:, 2], label="vz")
-    # plt.title("Commanded Velocity")
-    # plt.ylabel("Velocity (m/s)")
-    # plt.legend()
-    # plt.savefig("gate_pass_commands.png")
+    # Plot data
+    plt.figure()
+    plt.plot(yaw_angles)
+    plt.title("Yaw angle during 180-degree turn")
+    plt.ylabel("Yaw angle [deg]")
+    plt.savefig("yaw_angle.png")
