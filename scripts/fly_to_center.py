@@ -5,13 +5,10 @@ import cv2
 
 import tellox as tx
 
-from utils import *
-
 # Constants/environment definition
 MAX_HEIGHT = 5  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.3  # m/s; for safety
 DELTA_POS = 0.5  # increments for sending velocity commands
-Z_REF = 2.0  # target height for finding the AprilTags
 VEL_CONTROL_RATE = 50.0  # Hz
 MAX_FLIGHT_TIME = 100  # seconds
 GATE_NUM_TAGS = 6  # defines how many AprilTags make up a full gate
@@ -30,6 +27,18 @@ L2 = 4
 X_THRESH = 0.1  # meters
 Y_THRESH = 0.05
 Z_THRESH = 0.05
+
+
+def get_pose_gate_center(pilot: tx.Pilot, tags: list):
+    """
+    Takes list of Detection objects defining a gate and returns a numpy array denoting the
+    center of the gate
+    """
+    drone_poses = np.zeros((len(tags), 3))
+    for idx, t in enumerate(tags):
+        drone_poses[idx, :], _, _ = pilot.get_drone_pose(t)
+    pose_gate_center = np.mean(drone_poses, axis=0)
+    return pose_gate_center
 
 
 if __name__ == "__main__":
@@ -102,7 +111,8 @@ if __name__ == "__main__":
             img = pilot.get_camera_frame(visualize=False)
             tags = pilot.detect_tags(img, visualize=True)
             print("Detected {} AprilTags in FOV; expected {}".format(len(tags), GATE_NUM_TAGS))
-            # TODO just keep looping if it doesn't work?
+
+            # Tends to lose altitude just from drifting so it might lose tags
             if len(tags) < (GATE_NUM_TAGS - 2):
                 print("Waiting to re-detect all tags...")
                 aprilTag_lost_cnt += 1
@@ -165,12 +175,9 @@ if __name__ == "__main__":
                 pilot.send_control(xyz_velocity, 0.0)  # no yaw
                 vy_commands.append(xyz_velocity[1])
                 vz_commands.append(xyz_velocity[2])
-                # Let it run for a short amount of time before stopping?
                 time.sleep(1 / VEL_CONTROL_RATE)
-                # pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
 
 
-    # For debugging/analysis:
     # Plot logged data
     altitudes = np.array(altitudes)
     positions = np.array(positions)
@@ -182,6 +189,7 @@ if __name__ == "__main__":
     np.save("altitudes.npy", altitudes)
     np.save("vy.npy", vy_commands)
     np.save("vz.npy", vz_commands)
+    np.save("height_command_data.npy", np.array((altitudes, y_rel, vy_commands, vz_commands), dtype=float))
 
     # Plot data
     plt.figure()
