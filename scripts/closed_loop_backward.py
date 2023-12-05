@@ -5,8 +5,6 @@ import cv2
 
 import tellox as tx
 
-from utils import *
-
 # Constants
 MAX_HEIGHT = 2.5  # meters; depends on room, used for safety checks
 MAX_VEL_MAG = 0.5  # m/s; for safety
@@ -25,6 +23,19 @@ K = -0.5  # Simple feedback gain
 X_THRESH = 0.1  # meters
 Y_THRESH = 0.15
 Z_THRESH = 0.4  # noisier?
+
+
+def get_pose_gate_center(pilot: tx.Pilot, tags: list):
+    """
+    Takes list of Detection objects defining a gate and returns a numpy array denoting the
+    center of the gate
+    """
+    drone_poses = np.zeros((len(tags), 3))
+    for idx, t in enumerate(tags):
+        drone_poses[idx, :], _, _ = pilot.get_drone_pose(t)
+    pose_gate_center = np.mean(drone_poses, axis=0)
+    return pose_gate_center
+
 
 if __name__ == "__main__":
     print("Starting script...")
