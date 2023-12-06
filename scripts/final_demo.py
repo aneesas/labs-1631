@@ -9,9 +9,9 @@ from utils import *
 
 # Constants/environment definition
 MAX_HEIGHT = 8  # meters; depends on room, used for safety checks
-MAX_VEL_MAG = 0.75  # m/s; for safety
+MAX_VEL_MAG = 0.5  # m/s; for safety
 DELTA_POS = 1.0  # increments for sending velocity commands
-VEL_CONTROL_RATE = 5.0  # Hz
+VEL_CONTROL_RATE = 50.0  # Hz
 MAX_FLIGHT_TIME = 200  # seconds
 GATE_NUM_TAGS = 8  # defines how many AprilTags make up a full gate
 YAW_RATE = 25.0  # deg/sec; keep this within [-100, 100]
@@ -22,6 +22,10 @@ X_REF = -2.0  # meters; for stabilizing drone relative to AprilTag gate
 K1 = 1
 K2 = 2
 KY = -0.5  # Simple feedback gain for vy commands
+# A - BK - LC = [-4  1]
+#               [-5 -2]
+L1 = 4
+L2 = 4
 
 # Stabilization thresholds
 X_THRESH = 0.1  # meters
@@ -56,8 +60,7 @@ if __name__ == "__main__":
         times.append(readings.flight_time)
 
         # Current height
-        z = altitudes[-1]
-        if z > MAX_HEIGHT:
+        if altitudes[-1] > MAX_HEIGHT:
             print("WARNING: Flew too high! Landing for safety...")
             pilot.land()
             break
@@ -66,7 +69,6 @@ if __name__ == "__main__":
         img = pilot.get_camera_frame(visualize=False)
         tags = pilot.detect_tags(img, visualize=True)
         if tags:
-            # TODO we could slow down the velocity here
             # Stop only when all tags are in FOV
             if len(tags) == GATE_NUM_TAGS:
                 print("Gate found in field of view! Detected {} AprilTags".format(len(tags)))
@@ -76,9 +78,6 @@ if __name__ == "__main__":
         else:
             # Increase altitude to keep searching
             print("Increasing altitude...")
-            # az = k1*(z - z_ref) + k2*v_z_hat
-            # vz[t] = vz[t-1] + az[t]*dt
-            # vz = K1 * (z - Z_REF) TODO
             vz = -1 * KY * DELTA_POS
             vz = np.clip(vz, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
             xyz_velocity = np.array([0.0, 0.0, vz])
@@ -96,6 +95,10 @@ if __name__ == "__main__":
         controls_gate = []  # to store velocity control commands
         positions = []
         aprilTag_lost_cnt = 0
+        # Initialize observer state
+        vz_hat = 0.0
+        z_hat = 0.0
+        vz = 0.0
         while not stabilized and gate_found:
             print("Stabilizing at gate center...")
             # Log sensor readings
@@ -107,7 +110,8 @@ if __name__ == "__main__":
             img = pilot.get_camera_frame(visualize=False)
             tags = pilot.detect_tags(img, visualize=True)
             print("Detected {} AprilTags in FOV; expected {} for gate".format(len(tags), GATE_NUM_TAGS))
-            # TODO just keep looping if it doesn't work?
+
+            # Tends to lose altitude just from drifting so it might lose tags
             if len(tags) < (GATE_NUM_TAGS - 2):
                 print("Waiting to re-detect all tags...")
                 aprilTag_lost_cnt += 1
@@ -122,7 +126,7 @@ if __name__ == "__main__":
 
             # Check stabilization thresholds, then land the drone if within bounds
             x_diff = position[0] - X_REF
-            y_diff = -position[1]
+            y_diff = position[1]
             z_diff = position[2]
 
             if abs(x_diff) <= X_THRESH and abs(y_diff) <= Y_THRESH and abs(z_diff) <= Z_THRESH:
@@ -133,27 +137,45 @@ if __name__ == "__main__":
 
             else:
                 # Stabilize at the desired point
-                # TODO replace with actual controllers
+
+                # Simple feedback control
                 x_vel = KY * x_diff
                 y_vel = KY * y_diff
-                z_vel = KY * z_diff
-                controls_gate.append((x_vel, y_vel, z_vel))
 
+                # Full-state feedback
+                # az = -k1*(z_hat - z_ref) - k2*v_z_hat
+                # vz[t] = vz[t-1] + az[t]*dt
+                z = position[2]
+                altitudes.append(z)
+                dt = 1.0 / VEL_CONTROL_RATE
+                print("\tvz_hat = ", vz_hat)
+                az = -K1 * z_hat - (K2 * vz_hat)
+                print("\taz = ", az)
+                z_hat_dot = L1*z - L1*z_hat + vz_hat
+                vz_hat_dot = L2*z - (K1 + L2)*z_hat - (K2 * vz_hat)
+                vz = vz + az * dt
+
+                # Propagate states forward
+                z_hat += dt * z_hat_dot
+                vz_hat += dt * vz_hat_dot
+                print("Computed state = ({}, {}) (m, m/s)".format(z_hat, vz_hat))
+
+                # Control values
+                z_vel = vz
                 # Make sure to not go over control command bounds
                 x_vel = np.clip(x_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 y_vel = np.clip(y_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
                 z_vel = np.clip(z_vel, -1 * MAX_VEL_MAG, MAX_VEL_MAG)
 
                 xyz_velocity = np.array([x_vel, y_vel, z_vel])
-                # TODO eventually we want to plot what's actually sent, not computed
-                # so should store these velocity commands instead
+                controls_gate.append((x_vel, y_vel, z_vel))
+
                 print("Sending stabilization control:")
                 print("Velocity: ", xyz_velocity)
                 pilot.send_control(xyz_velocity, 0.0)  # no yaw
-                # Let it run for a short amount of time before stopping?
                 time.sleep(1 / VEL_CONTROL_RATE)
-                pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
 
+    pilot.send_control(np.array([0.0, 0.0, 0.0]), 0.0)
 
     print("Flying through gate...")
     x_dist = 4.0  # m
@@ -218,27 +240,3 @@ if __name__ == "__main__":
     controls_altitude = np.array(controls_altitude)
     controls_gate = np.array(controls_gate)
 
-    plt.figure()
-    plt.plot(controls_altitude[:, 2], label="z_vel")
-    plt.ylabel("Velocity control (m/s)")
-    plt.title("Velocity control to detect gate")
-    plt.legend()
-    plt.savefig("controls_altitude.png")
-
-    # plt.figure()
-    # plt.plot(controls_gate[:, 0], label="x_vel")
-    # plt.plot(controls_gate[:, 1], label="y_vel")
-    # plt.plot(controls_gate[:, 2], label="z_vel")
-    # plt.ylabel("Velocity control (m/s)")
-    # plt.title("Velocity control to center")
-    # plt.legend()
-    # plt.savefig("controls_gate.png")
-
-    # plt.figure()
-    # plt.plot(positions[:, 0], label="x")
-    # plt.plot(positions[:, 1], label="y")
-    # plt.plot(positions[:, 2], label="z")
-    # plt.title("Relative position of drone in top-left AprilTag frame")
-    # plt.ylabel("Rel. position (m)")
-    # plt.legend()
-    # plt.savefig("position_xyz.png")
